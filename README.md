@@ -8,6 +8,38 @@ Resultado final: una ventana de **WezTerm** translúcida con blur Acrylic de Win
 
 ---
 
+## Uso rápido
+
+### Instalar en una máquina nueva (dentro de WSL)
+
+```bash
+git clone git@github.com:antony2432/terminal-conf-wezterm.git ~/terminal-conf-wezterm
+cd ~/terminal-conf-wezterm
+./install.sh --dry-run     # revisar qué se va a cambiar, sin tocar nada
+./install.sh --deps        # instalar paquetes + colocar todos los archivos
+```
+
+Requisitos previos en Windows: WezTerm y JetBrainsMono Nerd Font instalados (ver [3.1](#31-windows)). Después de instalar, abrir WezTerm y pulsar `Ctrl+Shift+M`.
+
+### Guardar en el repo los cambios hechos en esta máquina
+
+```bash
+cd ~/terminal-conf-wezterm
+./actualizar.sh            # copia la config en uso al repo
+git diff                   # revisar los cambios
+git add -A && git commit -m "Describe el cambio" && git push
+```
+
+### Notas
+
+- `actualizar.sh` actualiza los archivos de configuración del repo, pero **no** las copias incrustadas en este README (secciones "Archivo completo"). Si el cambio es relevante, actualizar también la sección correspondiente.
+- `install.sh` guarda una copia de cada archivo que sobrescribe en `~/.terminal-conf-backup/<fecha>/`.
+- La carpeta `nvim/` es una copia de la configuración de Neovim, cuyo repositorio original es `antony2432/nvm-config`. Los cambios de nvim deben subirse también a ese repositorio.
+- El repositorio no contiene secretos (credenciales de Claude Code, cookies de ytm-player, key de atuin), pero sí archivos personales: el estilo de salida de Claude Code (`claude/output-styles/nino.md`), `claude/CLAUDE.md` y rutas con el nombre de usuario. Tenerlo en cuenta al decidir si el repositorio es público o privado.
+- El mod `/countdown` de Claude Code no se instala automáticamente (ver [13.4](#134-mod-countdown-dentro-de-claude-code)).
+
+---
+
 ## Índice
 
 1. [Arquitectura general](#1-arquitectura-general)
