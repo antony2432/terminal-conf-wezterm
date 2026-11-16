@@ -1,0 +1,68 @@
+#compdef countdown
+
+_countdown_colors() {
+  local -a c
+  c=(black red green yellow blue magenta cyan white gray)
+  _describe -t colors 'color (o 0-255, #rrggbb)' c
+}
+
+_countdown_styles() {
+  local -a styles
+  styles=("${(@f)$(command countdown conf --complete 2>/dev/null)}")
+  _describe -t styles 'estilo' styles
+}
+
+_countdown_conf() {
+  local prev=$words[CURRENT-1]
+  case $CURRENT in
+    3)
+      local -a flags
+      flags=(
+        '--style:elegir o listar estilos'
+                '--color:color de los dígitos'
+        '--done-color:color al terminar'
+      )
+      _describe -t flags 'conf' flags
+      ;;
+    *)
+      case $prev in
+        --style|-style)
+          compadd -X 'opción' -- --list preview
+          _countdown_styles
+          ;;
+        preview) _countdown_styles ;;
+        --preview|-p) _countdown_styles ;;
+        --color|--done-color|-c|-d) _countdown_colors ;;
+      esac
+      ;;
+  esac
+}
+
+_countdown() {
+  local curcontext="$curcontext" state line ret=1
+  typeset -A opt_args
+
+  if [[ $words[2] == conf ]]; then
+    _countdown_conf
+    return
+  fi
+
+  _arguments -C \
+    '(-c --color)'{-c,--color}'[color de los dígitos]:color:_countdown_colors' \
+    '(-d --done-color)'{-d,--done-color}'[color al terminar]:color:_countdown_colors' \
+    '--style[diseño de los dígitos]:estilo:_countdown_styles' \
+    '(-n --no-bar)'{-n,--no-bar}'[sin barra de progreso]' \
+    '(-b --no-bell)'{-b,--no-bell}'[sin campana al terminar]' \
+    '(-h --help)'{-h,--help}'[ayuda]' \
+    '1:tiempo:->first' \
+    '*:etiqueta:' && ret=0
+
+  if [[ $state == first ]]; then
+    local -a t
+    t=('conf:cambiar estilo y colores' 25m 10m 5m 1m 90s 1h 1h30m 5:00)
+    _describe -t times 'tiempo' t && ret=0
+  fi
+  return ret
+}
+
+_countdown "$@"

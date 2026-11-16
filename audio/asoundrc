@@ -1,0 +1,7 @@
+# ALSA -> PulseAudio (WSLg)
+pcm.!default {
+    type pulse
+}
+ctl.!default {
+    type pulse
+}

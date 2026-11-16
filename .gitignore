@@ -1,0 +1,16 @@
+# Nunca versionar credenciales ni datos de sesión
+.credentials.json
+auth.json
+cookies*.txt
+stream_cookies.txt
+*.db
+.env
+.env.*
+
+# Caché de Python generado por countdown
+__pycache__/
+*.pyc
+
+# Sistema
+.DS_Store
+Thumbs.db

@@ -1,0 +1,541 @@
+#!/usr/bin/env python3
+"""countdown: cuenta regresiva con dígitos grandes para la terminal.
+
+uso:
+  countdown TIEMPO [ETIQUETA...] [opciones]
+  countdown conf [--style [--list | preview [NOMBRE] | NOMBRE]]
+                 [--color COLOR] [--done-color COLOR]
+
+TIEMPO: 25m | 90s | 1h30m | 5:00 | 1:30:00 | 10 (minutos)
+
+opciones:
+  -c, --color COLOR        color de los dígitos (nombre, 0-255 o #rrggbb)
+  -d, --done-color COLOR   color al terminar
+  --style NOMBRE           diseño de los dígitos (ver: countdown conf --style --list)
+  -n, --no-bar             sin barra de progreso
+  -b, --no-bell            sin campana al terminar
+
+config en ~/.config/countdown/config (clave = valor):
+  style, color, done_color, bar, bell
+"""
+import colorsys, difflib, os, re, select, shutil, sys, termios, time, tty
+
+CONF_PATH = os.path.expanduser("~/.config/countdown/config")
+
+# ---------------------------------------------------------------- fuentes
+SEG = {"0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg", "4": "bcfg",
+       "5": "acdfg", "6": "acdefg", "7": "abc", "8": "abcdefg", "9": "abcdfg"}
+DIM, UNDIM = "\x1b[2m", "\x1b[22m"
+
+
+
+
+def segments(text, h, v):
+    """Display de siete segmentos de 7 líneas."""
+    rows = [""] * 7
+    for ch in text:
+        if ch == ":":
+            cells = ["   ", "   ", " ● ", "   ", " ● ", "   ", "   "]
+        else:
+            sg = SEG[ch]
+
+            def hb(k): return " " + (h * 5 if k in sg else "     ") + " "
+            def sd(l, r): return (v if l in sg else " ") + "     " + (v if r in sg else " ")
+
+            cells = [hb("a"), sd("f", "b"), sd("f", "b"), hb("g"),
+                     sd("e", "c"), sd("e", "c"), hb("d")]
+        for r in range(7):
+            rows[r] += cells[r] + " "
+    return rows
+
+
+def compose(text, font, gap=1):
+    """Une los glifos de `font` (lista de filas) en una sola línea de filas."""
+    height = len(font["0"])
+    rows = [""] * height
+    for ch in text:
+        g = font[ch]
+        w = max(len(x) for x in g)
+        for r in range(height):
+            rows[r] += g[r].ljust(w) + " " * gap
+    return [r.rstrip() if False else r for r in rows]
+
+
+# 6x5, dígitos de bloques del timer pomodoro (ascii/digits.go de Vibe30-day06)
+POMO = {
+    "0": [" ████ ", "██  ██", "██  ██", "██  ██", " ████ "],
+    "1": ["  ██  ", " ███  ", "  ██  ", "  ██  ", " ████ "],
+    "2": [" ████ ", "██  ██", "   ██ ", "  ██  ", "██████"],
+    "3": [" ████ ", "██  ██", "   ██ ", "██  ██", " ████ "],
+    "4": ["██  ██", "██  ██", "██████", "    ██", "    ██"],
+    "5": ["██████", "██    ", "█████ ", "    ██", "█████ "],
+    "6": [" ████ ", "██    ", "█████ ", "██  ██", " ████ "],
+    "7": ["██████", "    ██", "   ██ ", "  ██  ", "  ██  "],
+    "8": [" ████ ", "██  ██", " ████ ", "██  ██", " ████ "],
+    "9": [" ████ ", "██  ██", " █████", "    ██", " ████ "],
+    ":": ["  ", "██", "  ", "██", "  "],
+}
+
+# 7x7 con '#', al estilo figlet "banner"
+BANNER = {
+    "0": [" ##### ", "##   ##", "##  ###", "## # ##", "###  ##", "##   ##", " ##### "],
+    "1": ["  ##   ", " ###   ", "  ##   ", "  ##   ", "  ##   ", "  ##   ", " ######"],
+    "2": [" ##### ", "##   ##", "    ## ", "  ###  ", " ##    ", "##     ", "#######"],
+    "3": [" ##### ", "##   ##", "     ##", "  #### ", "     ##", "##   ##", " ##### "],
+    "4": ["   ### ", "  #### ", " ## ## ", "##  ## ", "#######", "    ## ", "    ## "],
+    "5": ["#######", "##     ", "###### ", "     ##", "     ##", "##   ##", " ##### "],
+    "6": [" ##### ", "##   ##", "##     ", "###### ", "##   ##", "##   ##", " ##### "],
+    "7": ["#######", "##   ##", "    ## ", "   ##  ", "  ##   ", "  ##   ", "  ##   "],
+    "8": [" ##### ", "##   ##", "##   ##", " ##### ", "##   ##", "##   ##", " ##### "],
+    "9": [" ##### ", "##   ##", "##   ##", " ######", "     ##", "##   ##", " ##### "],
+    ":": ["  ", "##", "##", "  ", "##", "##", "  "],
+}
+
+# 5x7 clásica (cero con diagonal), para el estilo arcade
+ARCADE = {
+    "0": [".###.", "#...#", "#..##", "#.#.#", "##..#", "#...#", ".###."],
+    "1": ["..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."],
+    "2": [".###.", "#...#", "....#", "...#.", "..#..", ".#...", "#####"],
+    "3": [".###.", "#...#", "....#", "..##.", "....#", "#...#", ".###."],
+    "4": ["...#.", "..##.", ".#.#.", "#..#.", "#####", "...#.", "...#."],
+    "5": ["#####", "#....", "####.", "....#", "....#", "#...#", ".###."],
+    "6": [".###.", "#...#", "#....", "####.", "#...#", "#...#", ".###."],
+    "7": ["#####", "....#", "...#.", "..#..", ".#...", ".#...", ".#..."],
+    "8": [".###.", "#...#", "#...#", ".###.", "#...#", "#...#", ".###."],
+    "9": [".###.", "#...#", "#...#", ".####", "....#", "#...#", ".###."],
+    ":": [".", ".", "#", ".", "#", ".", "."],
+}
+
+# ANSI Shadow (figlet), 6 líneas
+ANSI = {
+    "0": [" ██████╗ ", "██╔═████╗", "██║██╔██║", "████╔╝██║", "╚██████╔╝", " ╚═════╝ "],
+    "1": [" ██╗", "███║", "╚██║", " ██║", " ██║", " ╚═╝"],
+    "2": ["██████╗ ", "╚════██╗", " █████╔╝", "██╔═══╝ ", "███████╗", "╚══════╝"],
+    "3": ["██████╗ ", "╚════██╗", " █████╔╝", " ╚═══██╗", "██████╔╝", "╚═════╝ "],
+    "4": ["██╗  ██╗", "██║  ██║", "███████║", "╚════██║", "     ██║", "     ╚═╝"],
+    "5": ["███████╗", "██╔════╝", "███████╗", "╚════██║", "███████║", "╚══════╝"],
+    "6": [" ██████╗ ", "██╔════╝ ", "███████╗ ", "██╔═══██╗", "╚██████╔╝", " ╚═════╝ "],
+    "7": ["███████╗", "╚════██║", "    ██╔╝", "   ██╔╝ ", "   ██║  ", "   ╚═╝  "],
+    "8": [" █████╗ ", "██╔══██╗", "╚█████╔╝", "██╔══██╗", "╚█████╔╝", " ╚════╝ "],
+    "9": [" █████╗ ", "██╔══██╗", "╚██████║", " ╚═══██║", " █████╔╝", " ╚════╝ "],
+    ":": ["   ", "██╗", "╚═╝", "██╗", "╚═╝", "   "],
+}
+
+# líneas redondeadas, 5 filas
+ROUND = {
+    "0": ["╭───╮", "│   │", "│   │", "│   │", "╰───╯"],
+    "1": ["  ╷  ", " ╶┤  ", "  │  ", "  │  ", " ╶┴╴ "],
+    "2": ["╭───╮", "    │", "╭───╯", "│    ", "╰───╴"],
+    "3": ["╭───╮", "    │", " ───┤", "    │", "╰───╯"],
+    "4": ["╷   ╷", "│   │", "╰───┤", "    │", "    ╵"],
+    "5": ["╭────", "│    ", "╰───╮", "    │", "╰───╯"],
+    "6": ["╭────", "│    ", "├───╮", "│   │", "╰───╯"],
+    "7": ["╶───╮", "    │", "    │", "    │", "    ╵"],
+    "8": ["╭───╮", "│   │", "├───┤", "│   │", "╰───╯"],
+    "9": ["╭───╮", "│   │", "╰───┤", "    │", "╰───╯"],
+    ":": [" ", "●", " ", "●", " "],
+}
+
+_EDGE_CHAR = {
+    frozenset("u"): "─", frozenset("d"): "─", frozenset("l"): "│", frozenset("r"): "│",
+    frozenset("ul"): "┌", frozenset("ur"): "┐", frozenset("dl"): "└", frozenset("dr"): "┘",
+    frozenset("lr"): "│", frozenset("ud"): "─",
+    frozenset("ulr"): "┬", frozenset("dlr"): "┴", frozenset("udl"): "├", frozenset("udr"): "┤",
+    frozenset("udlr"): "┼",
+}
+_CONCAVE = {"ul": "┘", "ur": "└", "dl": "┐", "dr": "┌"}
+
+
+def arcade(text):
+    """Píxeles de 2 columnas con sombra de contorno desplazada abajo-derecha."""
+    filled, col = set(), 0
+    for ch in text:
+        g = ARCADE[ch]
+        for r, row in enumerate(g):
+            for c, v in enumerate(row):
+                if v == "#":
+                    filled.update((r, (col + c) * 2 + k) for k in (0, 1))
+        col += len(g[0]) + 1
+    height, width, dr, dc = 7, col * 2, 1, 2
+    shadow = {(r + dr, c + dc) for r, c in filled}
+    rows = []
+    for r in range(height + dr):
+        line = ""
+        for c in range(width + dc):
+            if (r, c) in filled:
+                line += "█"
+            elif (r, c) in shadow:
+                edges = frozenset(k for k, (rr, cc) in
+                                  (("u", (r - 1, c)), ("d", (r + 1, c)),
+                                   ("l", (r, c - 1)), ("r", (r, c + 1)))
+                                  if (rr, cc) not in shadow)
+                if edges:
+                    ch = _EDGE_CHAR[edges]
+                else:
+                    diag = [k for k, (rr, cc) in
+                            (("ul", (r - 1, c - 1)), ("ur", (r - 1, c + 1)),
+                             ("dl", (r + 1, c - 1)), ("dr", (r + 1, c + 1)))
+                            if (rr, cc) not in shadow]
+                    ch = _CONCAVE[diag[0]] if len(diag) == 1 else ("┼" if diag else " ")
+                line += (DIM + ch + UNDIM) if ch != " " else " "
+            else:
+                line += " "
+        rows.append(line)
+    return rows
+
+
+def boxed(lines, pad_x=2, pad_y=1):
+    w = max(len(re.sub(r"\x1b\[[0-9;]*m", "", l)) for l in lines)
+    top = "┌" + "─" * (w + 2 * pad_x) + "┐"
+    bot = "└" + "─" * (w + 2 * pad_x) + "┘"
+    blank = "│" + " " * (w + 2 * pad_x) + "│"
+    body = []
+    for l in lines:
+        plain = len(re.sub(r"\x1b\[[0-9;]*m", "", l))
+        body.append("│" + " " * pad_x + l + " " * (w - plain + pad_x) + "│")
+    return [top] + [blank] * pad_y + body + [blank] * pad_y + [bot]
+
+
+def gradient(lines, rgb):
+    """Degradado vertical desde `rgb` hacia el mismo tono girado 70° (solo con #rrggbb)."""
+    if not rgb:
+        return lines
+    h, sat, val = colorsys.rgb_to_hsv(*(x / 255 for x in rgb))
+    r2, g2, b2 = colorsys.hsv_to_rgb((h + 70 / 360) % 1, max(0.55, min(1, sat + 0.1)), val)
+    end = (r2 * 255, g2 * 255, b2 * 255)
+    n = max(1, len(lines) - 1)
+    out = []
+    for i, line in enumerate(lines):
+        t = i / n
+        c = [round(rgb[k] + (end[k] - rgb[k]) * t) for k in range(3)]
+        out.append(f"\x1b[38;2;{c[0]};{c[1]};{c[2]}m{line}")
+    return out
+
+
+# ---------------------------------------------------------------- estilos
+# nombre -> (descripción, función(text, opts) -> líneas)
+STYLES = {
+    "led":    ("Display LED de siete segmentos, trazo fino",
+               lambda t, o: segments(t, "━", "┃")),
+    "double": ("Siete segmentos con trazo doble",
+               lambda t, o: segments(t, "═", "║")),
+    "bold":   ("Siete segmentos con trazo grueso",
+               lambda t, o: segments(t, "▬", "█")),
+    "arcade": ("Píxeles retro con sombra de contorno",
+               lambda t, o: arcade(t)),
+    "banner": ("ASCII con # al estilo figlet banner",
+               lambda t, o: compose(t, BANNER)),
+    "pomo":   ("Bloques en caja, como el timer pomodoro de Vibe30",
+               lambda t, o: boxed(compose(t, POMO))),
+    "ansi":   ("ANSI Shadow: letras grandes con relieve",
+               lambda t, o: compose(t, ANSI, gap=0)),
+    "round":  ("Líneas finas con esquinas redondeadas",
+               lambda t, o: compose(t, ROUND)),
+    "aurora": ("ANSI Shadow con degradado de color vertical",
+               lambda t, o: gradient(compose(t, ANSI, gap=0), o.get("rgb"))),
+}
+
+
+def render(style, text, opts):
+    return STYLES[style][1](text, opts)
+
+
+# ---------------------------------------------------------------- utilidades
+NAMES = {"black": 0, "red": 1, "green": 2, "yellow": 3, "blue": 4,
+         "magenta": 5, "cyan": 6, "white": 7, "gray": 8, "grey": 8}
+
+
+def die(msg):
+    sys.exit(f"countdown: {msg}")
+
+
+def fg(spec):
+    spec = str(spec).strip().lower()
+    if spec in NAMES:
+        return f"\x1b[38;5;{NAMES[spec]}m"
+    if re.fullmatch(r"#[0-9a-f]{6}", spec):
+        r, g, b = (int(spec[i:i + 2], 16) for i in (1, 3, 5))
+        return f"\x1b[38;2;{r};{g};{b}m"
+    if spec.isdigit() and int(spec) < 256:
+        return f"\x1b[38;5;{spec}m"
+    die(f"color desconocido '{spec}'")
+
+
+def to_rgb(spec):
+    spec = str(spec).strip().lower()
+    if re.fullmatch(r"#[0-9a-f]{6}", spec):
+        return tuple(int(spec[i:i + 2], 16) for i in (1, 3, 5))
+    return None
+
+
+def parse_time(s):
+    s = s.strip().lower()
+    if re.fullmatch(r"\d+(:\d+){1,2}", s):
+        p = [int(x) for x in s.split(":")]
+        return (p[0] * 3600 + p[1] * 60 + p[2]) if len(p) == 3 else p[0] * 60 + p[1]
+    m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", s)
+    if m and s:
+        h, mi, se = (int(x or 0) for x in m.groups())
+        return h * 3600 + mi * 60 + se
+    if s.isdigit():
+        return int(s) * 60
+    return 0
+
+
+def fmt(sec):
+    sec = max(0, int(-(-sec // 1)))
+    h, m, s = sec // 3600, sec % 3600 // 60, sec % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def truthy(v):
+    return str(v).lower() in ("1", "true", "yes", "on")
+
+
+def load_config():
+    cfg = {}
+    try:
+        for line in open(CONF_PATH):
+            line = line.split("#", 1)[0].strip()
+            if "=" in line:
+                k, v = line.split("=", 1)
+                cfg[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return cfg
+
+
+def save_config(key, value):
+    os.makedirs(os.path.dirname(CONF_PATH), exist_ok=True)
+    try:
+        lines = open(CONF_PATH).read().splitlines()
+    except OSError:
+        lines = []
+    for n, line in enumerate(lines):
+        if line.split("#", 1)[0].split("=", 1)[0].strip() == key and "=" in line:
+            lines[n] = f"{key} = {value}"
+            break
+    else:
+        lines.append(f"{key} = {value}")
+    open(CONF_PATH, "w").write("\n".join(lines) + "\n")
+
+
+def split_eq(argv):
+    """--opt=valor -> --opt valor"""
+    out = []
+    for a in argv:
+        if a.startswith("--") and "=" in a:
+            k, v = a.split("=", 1)
+            out += [k, v]
+        else:
+            out.append(a)
+    return out
+
+
+def check_style(name):
+    if name in STYLES:
+        return name
+    close = difflib.get_close_matches(name, STYLES, n=1)
+    hint = f" ¿Quisiste decir '{close[0]}'?" if close else ""
+    die(f"el estilo '{name}' no existe.{hint} Lista: countdown conf --style --list")
+
+
+def options_from(cfg, color=None):
+    return {"rgb": to_rgb(color or cfg.get("color", "#cdd6f4"))}
+
+
+def print_preview(name, cfg, text="12:34"):
+    color = fg(cfg.get("color", "#cdd6f4"))
+    print(f"\x1b[1m{name}\x1b[0m  \x1b[2m{STYLES[name][0]}\x1b[0m")
+    for line in render(name, text, options_from(cfg)):
+        print(f"  {color}{line}\x1b[0m")
+    print()
+
+
+# ---------------------------------------------------------------- conf
+def conf_cmd(args):
+    args = split_eq(args)
+    cfg = load_config()
+    current = cfg.get("style", "led")
+    if current not in STYLES:
+        current = "led"
+
+    if not args:
+        print(f"estilo      {current}")
+        print(f"color       {cfg.get('color', '#cdd6f4')}")
+        print(f"done_color  {cfg.get('done_color', '#f38ba8')}")
+        print(f"\nconfig: {CONF_PATH}")
+        print("ver estilos: countdown conf --style --list")
+        return 0
+
+    # salidas para el autocompletado
+    if args[0] == "--complete":
+        for n, (d, _) in STYLES.items():
+            print(f"{n}:{d}")
+        return 0
+    if args[0] == "--names":
+        print("\n".join(STYLES))
+        return 0
+
+    key = args[0]
+    rest = args[1:]
+
+    if key in ("--style", "-style"):
+        if not rest or rest[0] in ("--list", "-list", "-l", "list"):
+            w = max(len(n) for n in STYLES)
+            print("Estilos disponibles:\n")
+            for n, (d, _) in STYLES.items():
+                mark = "●" if n == current else " "
+                print(f"  {mark} {n:<{w}}  {d}")
+            print("\n● = estilo actual")
+            print("elegir:   countdown conf --style NOMBRE")
+            print("ver todos: countdown conf --style preview")
+            return 0
+        if rest[0] in ("preview", "--preview", "-p"):
+            names = [check_style(rest[1])] if len(rest) > 1 else list(STYLES)
+            for n in names:
+                print_preview(n, cfg)
+            return 0
+        name = check_style(rest[0])
+        save_config("style", name)
+        print(f"Estilo guardado: {name}\n")
+        print_preview(name, cfg)
+        return 0
+
+    if key in ("--preview", "-p"):
+        names = [check_style(rest[0])] if rest else list(STYLES)
+        for n in names:
+            print_preview(n, cfg)
+        return 0
+
+    if key in ("--color", "-c", "--done-color", "-d"):
+        if not rest:
+            die(f"falta el valor de {key}")
+        fg(rest[0])  # valida
+        k = "color" if key in ("--color", "-c") else "done_color"
+        save_config(k, rest[0])
+        print(f"{k} guardado: {rest[0]}")
+        return 0
+
+    die(f"opción desconocida para conf: '{key}' (prueba: countdown conf --style --list)")
+
+
+# ---------------------------------------------------------------- cuenta regresiva
+def run(argv):
+    cfg = load_config()
+    color = cfg.get("color", "#cdd6f4")
+    done_color = cfg.get("done_color", "#f38ba8")
+    style = cfg.get("style", "led")
+    if style not in STYLES:
+        style = "led"
+    opts = options_from(cfg)
+    bar = truthy(cfg.get("bar", "true"))
+    bell = truthy(cfg.get("bell", "true"))
+    words, i = [], 0
+    argv = split_eq(argv)
+
+    def val():
+        nonlocal i
+        i += 1
+        if i >= len(argv):
+            die(f"falta el valor de {argv[i - 1]}")
+        return argv[i]
+
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-h", "--help"):
+            print(__doc__.strip()); return 0
+        elif a in ("-c", "--color"): color = val()
+        elif a in ("-d", "--done-color"): done_color = val()
+        elif a == "--style": style = val()
+        elif a in ("-n", "--no-bar"): bar = False
+        elif a in ("-b", "--no-bell"): bell = False
+        elif a.startswith("-") and len(a) > 1 and not a[1].isdigit():
+            die(f"opción desconocida '{a}' (ayuda: countdown --help)")
+        else: words.append(a)
+        i += 1
+    if not words:
+        print(__doc__.strip()); return 1
+    if style not in STYLES:
+        check_style(style)
+    total = parse_time(words[0])
+    if total <= 0:
+        die(f"no entiendo el tiempo '{words[0]}' (prueba 25m, 90s, 1h30m, 5:00)")
+    label = " ".join(words[1:])
+    c_run, c_done = fg(color), fg(done_color)
+
+    out = sys.stdout
+    interactive = sys.stdin.isatty()
+    old = termios.tcgetattr(0) if interactive else None
+    out.write("\x1b[?1049h\x1b[?25l")
+    if interactive:
+        tty.setcbreak(0)
+
+    end = time.monotonic() + total
+    paused_left = None
+    done = False
+    try:
+        while True:
+            now = time.monotonic()
+            left = paused_left if paused_left is not None else end - now
+            if left <= 0 and not done:
+                done, left = True, 0
+                if bell:
+                    out.write("\a")
+            cols, rows = shutil.get_terminal_size()
+            opts["rgb"] = to_rgb(done_color if done else color)
+            lines = render(style, fmt(left), opts)
+            body = [(c_done if done else c_run, l) for l in lines]
+            if label:
+                body += [("", ""), (c_done if done else c_run, "\x1b[1m" + label)]
+            if bar:
+                w = max(10, min(cols - 6, 38))
+                pct = min(1.0, (total - left) / total)
+                f = round(pct * w)
+                body.append(("", ""))
+                body.append((c_done if done else c_run,
+                             "━" * f + DIM + "─" * (w - f) + UNDIM + f"  {int(pct * 100)}%"))
+            top = max(0, (rows - len(body)) // 2)
+            out.write("\x1b[2J")
+            for n, (sty, line) in enumerate(body):
+                plain = re.sub(r"\x1b\[[0-9;]*m", "", line)
+                x = max(0, (cols - len(plain)) // 2)
+                out.write(f"\x1b[{top + n + 1};{x + 1}H{sty}{line}\x1b[0m")
+            out.flush()
+
+            if interactive:
+                ready, _, _ = select.select([0], [], [], 0.2)
+                if ready:
+                    k = os.read(0, 8).decode(errors="ignore")
+                    if k in ("q", "Q", "\x03", "\x1b"):
+                        break
+                    if k == " " and not done:
+                        if paused_left is None:
+                            paused_left = end - time.monotonic()
+                        else:
+                            end = time.monotonic() + paused_left
+                            paused_left = None
+                    if k in ("r", "R"):
+                        end, paused_left, done = time.monotonic() + total, None, False
+            else:
+                time.sleep(0.2)
+                if done:
+                    break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if old:
+            termios.tcsetattr(0, termios.TCSADRAIN, old)
+        out.write("\x1b[?25h\x1b[?1049l")
+        out.flush()
+    return 0
+
+
+def main(argv):
+    if argv and argv[0] == "conf":
+        return conf_cmd(argv[1:])
+    return run(argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

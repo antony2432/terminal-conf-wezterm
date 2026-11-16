@@ -1,0 +1,11 @@
+[theme]
+name = "nordtron"
+
+[colors]
+Base       = "#d8dee9"
+Annotation = "#5e81ac"
+Guidance   = "#4c566a"
+Important  = "#88c0d0"
+AlertInfo  = "#a3be8c"
+AlertWarn  = "#ebcb8b"
+AlertError = "#bf616a"

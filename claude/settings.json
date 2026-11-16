@@ -1,0 +1,20 @@
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "python3 ~/.claude/statusline.py",
+    "padding": 0,
+    "refreshInterval": 1
+  },
+  "enabledPlugins": {
+    "lua-lsp@claude-plugins-official": true
+  },
+  "modelSettings": {
+    "claude-sonnet-5-5": {
+      "autoCompactWindow": 400000
+    }
+  },
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark-ansi"
+}

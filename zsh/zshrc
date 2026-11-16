@@ -1,0 +1,154 @@
+# ── Siempre arrancar en ~ ─────────────────────────────────────────────
+# WSL abre en el directorio de Windows (/mnt/...) si se lanza desde ahi.
+[[ $PWD == /mnt/* ]] && cd ~
+
+# ── Instant prompt de Powerlevel10k ───────────────────────────────────
+# Debe ir al principio del todo; nada que escriba en pantalla puede ir antes.
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+# ── Historial ─────────────────────────────────────────────────────────
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt HIST_IGNORE_ALL_DUPS SHARE_HISTORY INC_APPEND_HISTORY EXTENDED_HISTORY
+
+# ── Completado ────────────────────────────────────────────────────────
+# fpath debe incluir nuestras funciones ANTES de compinit.
+fpath=(~/.local/share/zsh/site-functions $fpath)
+autoload -Uz compinit && compinit -d "${XDG_CACHE_HOME:-$HOME/.cache}/zcompdump"
+
+zstyle ':completion:*' menu select                       # menu navegable con flechas
+zstyle ':completion:*' verbose yes                       # mostrar descripciones
+zstyle ':completion:*' group-name ''                     # agrupar por tipo
+zstyle ':completion:*' list-separator '--'              # separador antes de la descripcion
+zstyle ':completion:*:descriptions' format 'Completing %d'  # cabecera de cada grupo
+zstyle ':completion:*:warnings' format 'Sin coincidencias para: %d'
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'  # ignorar mayus/minus
+zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
+# ── perfil (equivalente a Microsoft.PowerShell_profile.ps1) ───────────
+# Terminal-Icons -> eza con iconos (necesita Nerd Font: JetBrainsMono NF)
+# Nota: eza 0.23.4 de Ubuntu no imprime nada si no recibe una ruta,
+# asi que se la anadimos (".") cuando el usuario solo pasa flags.
+eza_wrap() {
+  local a has_path=0
+  for a in "$@"; do [[ $a != -* ]] && has_path=1; done
+  if (( has_path )); then command eza "$@"; else command eza "$@" .; fi
+}
+ls() { eza_wrap --icons --group-directories-first "$@"; }
+ll() { eza_wrap -la --icons --group-directories-first "$@"; }   # Get-ChildItem -Force
+la() { eza_wrap -a  --icons --group-directories-first "$@"; }
+lt() { eza_wrap --tree --level=2 --icons "$@"; }
+
+# clear + fastfetch centrado horizontalmente. Fastfetch dibuja la info junto al
+# logo con codigos de mover el cursor, asi que no se puede rellenar linea a linea:
+# se mide el bloque (logo + margen + info) y se desplaza entero con
+# --logo-padding-left. El margen (3) debe coincidir con logo.padding.right de
+# ~/.config/fastfetch/config.jsonc.
+cf() {
+  clear
+  local gap=3 logo_w=0 info_w=0 line pad
+  for line in "${(@f)$(fastfetch --pipe false --structure break --logo-padding-top 0 --logo-padding-right 0 | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g')}"; do
+    (( ${#line} > logo_w )) && logo_w=${#line}
+  done
+  for line in "${(@f)$(fastfetch --pipe false --logo none | sed 's/\x1b\[[0-9;?]*m//g')}"; do
+    (( ${#line} > info_w )) && info_w=${#line}
+  done
+  pad=$(( (COLUMNS - (logo_w + gap + info_w)) / 2 ))
+  (( pad < 0 )) && pad=0
+  fastfetch --logo-padding-left "$pad"
+  echo
+  _CF_FRESH=1
+}
+
+# Al redimensionar el panel (split de tmux, resize de ventana) el banner ya
+# impreso no se reacomoda. Mientras la pantalla solo tenga el banner (nada
+# ejecutado despues de cf) se repinta al nuevo ancho; si ya hay trabajo en
+# pantalla no se toca. preexec apaga la bandera con cualquier comando.
+typeset -g _CF_FRESH=
+_cf_preexec() { _CF_FRESH= }
+autoload -Uz add-zsh-hook
+add-zsh-hook preexec _cf_preexec
+TRAPWINCH() {
+  [[ -n $_CF_FRESH ]] || return 0
+  if zle; then
+    cf
+    print
+    zle -I
+    zle reset-prompt
+  else
+    cf
+  fi
+}
+
+# Banner al abrir cualquier shell interactiva (terminal nueva, split de tmux).
+# Se pinta en el primer line-init de zle (editor de linea ya activo) y no en
+# precmd ni al cargar: el instant prompt de p10k redibuja desde arriba al
+# terminar su traspaso y borraria el banner. Se borra a si mismo.
+_cf_first() {
+  add-zle-hook-widget -d line-init _cf_first
+  cf
+  print
+  zle -I
+  zle reset-prompt
+}
+autoload -Uz add-zle-hook-widget
+zle -N _cf_first
+add-zle-hook-widget line-init _cf_first
+dev() { cd /mnt/c/Users/Antony/Documents/dev; }             # atajo a proyectos
+
+# ── Binarios de usuario (Claude Code nativo, etc.) ────────────────────
+# zsh no lee ~/.profile, asi que ~/.local/bin hay que anadirlo aqui.
+export PATH="$HOME/.local/bin:$PATH"
+
+# ── Binarios de los LSP que instala Mason ─────────────────────────────
+export PATH="$HOME/.local/share/nvim/mason/bin:$PATH"
+
+# ── ytm (YouTube Music en terminal) ───────────────────────────────────
+# libpipewire escribe avisos de "client.conf" sobre la interfaz porque aqui
+# el audio va por PulseAudio de WSLg y no hay servidor pipewire. Se silencian
+# solo para ytm (PIPEWIRE_DEBUG=0); el audio no cambia.
+ytm() { PIPEWIRE_DEBUG=0 command ytm "$@"; }
+
+# ── nvm ───────────────────────────────────────────────────────────────
+export NVM_DIR="$HOME/.nvm"
+# Cargar nvm.sh entero + nvm_auto costaba ~550 ms en CADA shell (tambien en
+# cada split). Ahora: el bin del node por defecto se pone en el PATH a mano
+# (node/npm/npx disponibles al instante) y nvm de verdad solo se carga la
+# primera vez que se usa el comando `nvm`.
+if [[ -r $NVM_DIR/alias/default ]]; then
+  _nvm_def="v${$(<$NVM_DIR/alias/default)#v}"
+  [[ -d $NVM_DIR/versions/node/$_nvm_def/bin ]] \
+    && path=("$NVM_DIR/versions/node/$_nvm_def/bin" $path)
+  unset _nvm_def
+fi
+nvm() {
+  unfunction nvm
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  # El completado de nvm esta escrito para bash; en zsh necesita bashcompinit.
+  if [ -s "$NVM_DIR/bash_completion" ]; then
+    autoload -U +X bashcompinit && bashcompinit
+    \. "$NVM_DIR/bash_completion"
+  fi
+  nvm "$@"
+}
+
+# ── zoxide (cd con memoria) ───────────────────────────────────────────
+# Debe ir despues de compinit para que registre su completado.
+eval "$(zoxide init zsh)"
+
+# ── atuin (historial con busqueda difusa) ─────────────────────────────
+# Reemplaza Ctrl+R y la flecha Arriba. Tambien debe ir despues de compinit.
+eval "$(atuin init zsh)"
+
+# ── Sugerencias en linea (estilo fish) ────────────────────────────────
+# Muestra en gris el resto del comando segun escribes, sacado del
+# historial. Se acepta con la flecha Derecha o Fin.
+source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#4c566a'   # gris nord3, a juego
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+
+# ── Powerlevel10k ─────────────────────────────────────────────────────
+source ~/.local/share/powerlevel10k/powerlevel10k.zsh-theme
+[[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh

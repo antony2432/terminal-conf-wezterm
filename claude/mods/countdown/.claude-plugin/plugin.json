@@ -1,0 +1,33 @@
+{
+  "name": "countdown",
+  "version": "0.1.0",
+  "description": "Customizable countdown timer in a pane, driven by /countdown",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "color": {
+      "type": "string",
+      "title": "Digit color",
+      "description": "Color of the big digits (theme key or CSS color such as #89b4fa)",
+      "default": "#cdd6f4"
+    },
+    "doneColor": {
+      "type": "string",
+      "title": "Finished color",
+      "description": "Color of the digits once the countdown reaches zero",
+      "default": "#f38ba8"
+    },
+    "scale": {
+      "type": "string",
+      "title": "Digit size",
+      "description": "Size of the digits",
+      "default": "big",
+      "options": ["big", "small"]
+    },
+    "glyph": {
+      "type": "string",
+      "title": "Digit glyph",
+      "description": "Character used to draw the digits",
+      "default": "█"
+    }
+  }
+}

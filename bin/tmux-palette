@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Paleta de comandos de tmux: se abre en un popup (display-popup) y usa fzf.
+#
+#   tmux-palette <pane_id> <ruta> <cliente>      menu interactivo
+#   tmux-palette --accion "<etiqueta>" <pane_id> <ruta> <cliente>   ejecuta una accion sin menu
+#
+# El pane, la ruta y el cliente se pasan desde el bind de tmux (formatos
+# #{pane_id}, #{pane_current_path}, #{client_name}) para que cada accion se
+# aplique al panel y al cliente desde donde se abrio el popup, no al popup.
+
+set -u
+
+# Fondo y texto en la paleta Nord (a juego con tmux y WezTerm).
+FZF_COLORS='fg:#d8dee9,bg:#2e3440,hl:#88c0d0,fg+:#eceff4,bg+:#3b4252,hl+:#88c0d0,pointer:#88c0d0,prompt:#5e81ac,gutter:#2e3440,info:#4c566a,header:#4c566a,query:#eceff4'
+CIAN=$'\033[38;2;136;192;208m'
+ROJO=$'\033[38;2;191;97;106m'
+GRIS=$'\033[38;2;76;86;106m'
+FIN=$'\033[0m'
+
+# Elegir una linea de stdin con fzf. $1 = prompt.
+elegir() {
+  fzf --ansi --layout=reverse --info=hidden --no-scrollbar --border=none \
+    --padding=1,2 --pointer='▌' --prompt="$1" --color="$FZF_COLORS" \
+    --delimiter=$'\t' --tabstop=30 --height=100%
+}
+
+# Pedir una linea de texto. Resultado en $REPLY.
+pedir() {
+  printf '%s%s%s ' "$CIAN" "$1" "$FIN"
+  read -r REPLY
+}
+
+# Confirmar una accion destructiva con [s/N].
+confirmar() {
+  printf '%s%s [s/N] %s' "$ROJO" "$1" "$FIN"
+  local r
+  read -r -n1 r
+  echo
+  [[ $r == [sSyY] ]]
+}
+
+# tmux no admite "." ni ":" en nombres de sesion; se limpian tambien los bordes.
+limpiar_nombre() {
+  local n="${1//[.:]/_}"
+  n="${n#"${n%%[![:space:]]*}"}"
+  n="${n%"${n##*[![:space:]]}"}"
+  printf '%s' "$n"
+}
+
+# ejecutar <etiqueta> <pane_id> <ruta> <cliente>
+ejecutar() {
+  local accion="$1" pane="$2" ruta="$3" cliente="$4" sesion nombre
+  sesion=$(tmux display-message -p -t "$pane" '#{session_id}')
+  case "$accion" in
+    "Nueva ventana") tmux new-window -t "${sesion}:" -c "$ruta" ;;
+    "Dividir panel a la derecha") tmux split-window -h -t "$pane" -c "$ruta" ;;
+    "Dividir panel hacia abajo") tmux split-window -v -t "$pane" -c "$ruta" ;;
+    "Maximizar / restaurar panel") tmux resize-pane -Z -t "$pane" ;;
+    "Cerrar panel") confirmar "Cerrar el panel?" && tmux kill-pane -t "$pane" ;;
+    "Cerrar ventana") confirmar "Cerrar la ventana?" && tmux kill-window -t "$pane" ;;
+    "Renombrar ventana")
+      pedir "Nuevo nombre de la ventana:"
+      [[ -n $REPLY ]] && tmux rename-window -t "$pane" "$REPLY"
+      ;;
+    "Renombrar sesión")
+      pedir "Nuevo nombre de la sesión:"
+      nombre=$(limpiar_nombre "$REPLY")
+      [[ -n $nombre ]] && tmux rename-session -t "$sesion" "$nombre"
+      ;;
+    "Nueva sesión")
+      pedir "Nombre de la nueva sesión:"
+      nombre=$(limpiar_nombre "$REPLY")
+      if [[ -n $nombre ]]; then
+        tmux new-session -d -s "$nombre" -c "$ruta" 2>/dev/null
+        tmux switch-client -c "$cliente" -t "=$nombre"
+      fi
+      ;;
+    "Ir a sesión")
+      nombre=$(tmux list-sessions -F '#S' | elegir 'sesión ❯ ')
+      [[ -n $nombre ]] && tmux switch-client -c "$cliente" -t "=$nombre"
+      ;;
+    "Desconectar de tmux") tmux detach-client -t "$cliente" ;;
+  esac
+}
+
+# Una linea por accion: etiqueta <tab> atajo (en gris).
+menu() {
+  local linea
+  while IFS='|' read -r etiqueta atajo; do
+    printf '%s\t%s%s%s\n' "$etiqueta" "$GRIS" "$atajo" "$FIN"
+  done <<'EOF'
+Nueva sesión|
+Ir a sesión|
+Nueva ventana|Alt+T
+Dividir panel a la derecha|Alt+\
+Dividir panel hacia abajo|Alt+-
+Maximizar / restaurar panel|Alt+Z
+Renombrar ventana|
+Renombrar sesión|
+Cerrar panel|Alt+Q
+Cerrar ventana|Alt+W
+Desconectar de tmux|
+EOF
+}
+
+if [[ ${1:-} == --accion ]]; then
+  ejecutar "$2" "$3" "$4" "$5"
+  exit
+fi
+
+# --abrir <pane_id> <ruta> <cliente>: lo llama el bind via run-shell, que SI
+# expande los formatos (display-popup no los expande dentro de su comando).
+# Abre el popup sobre el cliente indicado y relanza este mismo script dentro.
+if [[ ${1:-} == --abrir ]]; then
+  tmux display-popup -c "$4" -d "$3" -E -xC -yC -w 62 -h 17 -b rounded \
+    -T " Paleta de comandos " -s "bg=#2e3440,fg=#d8dee9" -S "fg=#88c0d0,bg=#2e3440" \
+    "$(printf '%q ' "$0" "$2" "$3" "$4")"
+  exit
+fi
+
+pane="${1:-}" ruta="${2:-$HOME}" cliente="${3:-}"
+seleccion=$(menu | elegir '❯ ') || exit 0
+[[ -z $seleccion ]] && exit 0
+ejecutar "${seleccion%%$'\t'*}" "$pane" "$ruta" "$cliente"

@@ -1,0 +1,3 @@
+# Finales de línea LF siempre: los scripts de shell y zsh fallan con CRLF
+# si el repo se clona con Git for Windows.
+* text=auto eol=lf
