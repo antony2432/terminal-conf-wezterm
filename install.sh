@@ -7,7 +7,10 @@
 #                             (WezTerm siempre se copia: Windows no sigue symlinks de WSL)
 #   ./install.sh --deps       instala además paquetes apt, Powerlevel10k, atuin y nvm
 #   ./install.sh --dry-run    muestra lo que haría sin tocar nada
+#   ./install.sh --ytm        instala además la música en terminal (ytm-player,
+#                             mpv, audio de WSLg y ~/.asoundrc). Por defecto NO se instala.
 #
+# Las opciones se pueden combinar: ./install.sh --deps --ytm
 # Antes de sobrescribir un archivo existente se guarda una copia en
 # ~/.terminal-conf-backup/<fecha>/ con la misma ruta relativa a $HOME.
 
@@ -17,12 +20,14 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODO=copiar
 DEPS=0
 DRY=0
+YTM=0
 for a in "$@"; do
   case "$a" in
     --link) MODO=enlazar ;;
     --deps) DEPS=1 ;;
     --dry-run) DRY=1 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --ytm) YTM=1 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
     *) echo "Opción desconocida: $a" >&2; exit 1 ;;
   esac
 done
@@ -73,7 +78,7 @@ if (( DEPS )); then
   info "Paquetes apt"
   run sudo apt update
   run sudo apt install -y zsh tmux git fzf eza zoxide fastfetch zsh-autosuggestions \
-    python3 rsync curl mpv pipx
+    python3 rsync curl
 
   if ! command -v atuin >/dev/null; then
     info "atuin"
@@ -115,8 +120,19 @@ instalar atuin/config.toml "$HOME/.config/atuin/config.toml"
 instalar atuin/themes/nordtron.toml "$HOME/.config/atuin/themes/nordtron.toml"
 instalar countdown/config "$HOME/.config/countdown/config"
 
-info "Audio (ALSA → PulseAudio de WSLg)"
-instalar audio/asoundrc "$HOME/.asoundrc"
+if (( YTM )); then
+  info "Música en terminal (ytm-player)"
+  run sudo apt install -y pipx mpv libmpv2 libasound2t64 libasound2-plugins pulseaudio-utils
+  if command -v ytm >/dev/null 2>&1 || [[ -d $HOME/.local/share/pipx/venvs/ytm-player ]]; then
+    echo "   = ytm-player (ya instalado)"
+  else
+    run pipx install ytm-player
+  fi
+  info "Audio (ALSA → PulseAudio de WSLg)"
+  instalar audio/asoundrc "$HOME/.asoundrc"
+else
+  aviso "Música en terminal (ytm-player) omitida. Para instalarla: ./install.sh --ytm"
+fi
 
 info "Claude Code"
 instalar claude/settings.json "$HOME/.claude/settings.json"

@@ -17,7 +17,10 @@ git clone git@github.com:antony2432/terminal-conf-wezterm.git ~/terminal-conf-we
 cd ~/terminal-conf-wezterm
 ./install.sh --dry-run     # revisar qué se va a cambiar, sin tocar nada
 ./install.sh --deps        # instalar paquetes + colocar todos los archivos
+./install.sh --deps --ytm  # lo mismo, incluyendo la música en terminal (opcional)
 ```
+
+La música en terminal (ytm-player, mpv, audio de WSLg y `~/.asoundrc`) **no se instala por defecto**; solo con `--ytm`. Ver [sección 15](#15-música-en-terminal-ytm-player).
 
 Requisitos previos en Windows: WezTerm y JetBrainsMono Nerd Font instalados (ver [3.1](#31-windows)). Después de instalar, abrir WezTerm y pulsar `Ctrl+Shift+M`.
 
@@ -142,7 +145,10 @@ Principios que guían todo el diseño:
 # Paquetes base
 sudo apt update
 sudo apt install -y zsh tmux git fzf eza zoxide fastfetch zsh-autosuggestions \
-                    python3 mpv pipx
+                    python3 rsync curl
+# Opcional, solo para la música en terminal (sección 15):
+#   sudo apt install -y pipx mpv libmpv2 libasound2t64 libasound2-plugins pulseaudio-utils
+#   pipx install ytm-player
 # atuin (si no está en apt de la distro)
 curl --proto '=https' --tlsv1.2 -LsSf https://setup.atuin.sh | sh
 
@@ -169,6 +175,7 @@ cd ~/terminal-conf-wezterm
 ./install.sh --deps        # máquina nueva: paquetes apt, p10k, atuin, nvm + archivos
 ./install.sh               # solo copiar los archivos
 ./install.sh --link        # enlazar (symlink) al repo: editar ~/.tmux.conf edita el repo
+./install.sh --ytm         # añadir la música en terminal (opcional, apagada por defecto)
 ```
 
 - Antes de sobrescribir algo guarda una copia en `~/.terminal-conf-backup/<fecha>/`.
@@ -1722,6 +1729,8 @@ Es independiente del `countdown` de la terminal (sección 12): misma idea, otro 
 ---
 
 ## 15. Música en terminal (ytm-player)
+
+**Opcional.** `install.sh` solo lo instala con `--ytm`: paquetes `pipx mpv libmpv2 libasound2t64 libasound2-plugins pulseaudio-utils`, `pipx install ytm-player` y `audio/asoundrc` → `~/.asoundrc`. Sin `--ytm` no se toca nada de esto. La función `ytm()` de `~/.zshrc` se queda igualmente; sin ytm-player instalado no hace nada hasta que se invoca. Para instalarlo más tarde basta con `./install.sh --ytm`. Después hay que iniciar sesión en ytm-player con la cuenta propia (las credenciales no están en el repo).
 
 - `ytm-player` 2.2.0 instalado con `pipx` (`~/.local/bin/ytm`), usa `mpv` 0.41 y `yt-dlp`.
 - Audio de WSL por WSLg/PulseAudio (`~/.asoundrc` apunta a pulse; paquetes `libasound2t64`, `libasound2-plugins`, `pulseaudio-utils`).
