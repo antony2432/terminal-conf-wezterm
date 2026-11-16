@@ -145,7 +145,7 @@ if [[ ! -e $HOME/.claude/memory/MEMORY.md ]]; then
   (( DRY )) || printf '# Índice de memoria global\n' > "$HOME/.claude/memory/MEMORY.md"
   echo "   → $HOME/.claude/memory/MEMORY.md (índice vacío)"
 fi
-aviso "El mod /countdown (claude/mods/countdown) no se instala solo: ver README, sección 13.4."
+aviso "El mod /countdown (claude/mods/countdown) no se instala solo: ver docs/CONFIGURACION.md, sección 13.4."
 
 info "Neovim"
 if [[ -d $HOME/.config/nvim/.git ]]; then
